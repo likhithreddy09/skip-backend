@@ -58,9 +58,16 @@ def embed_session():
     """Mints a single-use Hosted Embed URL for the signed-in user (10-minute TTL)."""
     body = parse_body(EmbedSessionIn)
     user = current_user()
+    mobile = user.get("mobile")
+    if not mobile:
+        raise ApiError(
+            422,
+            "MOBILE_REQUIRED",
+            "Add your mobile number in your profile before buying or selling gold.",
+        )
     payload = {
         "flow": "embed",
-        "mobile": user["mobile"],
+        "mobile": mobile,
         "meta": {"app": "SkipMint", "source": body.source or "app", "skipmint_user_id": str(user["_id"])},
     }
     name = user.get("name") or (user.get("profile") or {}).get("name")

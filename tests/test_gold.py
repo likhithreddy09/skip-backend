@@ -19,20 +19,28 @@ def test_prices_cached(client, oro):
     assert len([c for c in oro.calls if c["path"] == "/prices"]) == 1
 
 
-def test_embed_session_uses_account_mobile(client, auth, oro):
+def test_embed_session_uses_account_mobile(client, gold_auth, oro):
     oro.on("POST", "/users/init", data={"user_code": "usr_e1", "embed_url": "https://connect.oropocket.com/?u=usr_e1",
                                         "expires_in_seconds": 600, "mode": "sandbox"})
     res = client.post("/api/v1/gold/embed-session",
                       json={"launch": {"screen": "sip", "metal": "gold", "amount": 500, "frequency": "weekly"},
-                            "mobile": "9999999999"}, headers=auth)
+                            "mobile": "9999999999"}, headers=gold_auth)
     assert res.status_code == 200
     sent = oro.calls[-1]["json"]
-    assert sent["mobile"] == "9876543210"  # never the client-supplied number
+    assert sent["mobile"] == "9876543210"  # the user's saved number, never the client-supplied one
     assert sent["launch"]["screen"] == "sip"
     assert "user_code" not in res.get_json()["data"]
 
 
-def test_embed_launch_fallback(client, auth, oro):
+def test_embed_session_requires_mobile(client, auth, oro):
+    # A Google user who hasn't added a mobile can't open the gold embed.
+    oro.on("POST", "/users/init", data={"user_code": "usr_e0"})
+    res = client.post("/api/v1/gold/embed-session", json={"launch": {"screen": "buy"}}, headers=auth)
+    assert res.status_code == 422
+    assert res.get_json()["error"]["code"] == "MOBILE_REQUIRED"
+
+
+def test_embed_launch_fallback(client, gold_auth, oro):
     calls = {"n": 0}
 
     def fake(method, path, *, json=None, params=None, idempotency_key=None):
@@ -44,7 +52,7 @@ def test_embed_launch_fallback(client, auth, oro):
 
     import app.services.oropocket as oropocket
     oropocket.call = fake
-    data = client.post("/api/v1/gold/embed-session", json={"launch": {"screen": "buy"}}, headers=auth).get_json()["data"]
+    data = client.post("/api/v1/gold/embed-session", json={"launch": {"screen": "buy"}}, headers=gold_auth).get_json()["data"]
     assert data["launch_fallback"] is True and calls["n"] == 2
 
 
@@ -64,7 +72,7 @@ def test_trading_gated_by_default(client, auth, oro):
     assert res.status_code == 403
 
 
-def test_trade_quote_confirm_flow(app, client, auth, oro):
+def test_trade_quote_confirm_flow(app, client, gold_auth, oro):
     app.config["ENABLE_RAW_TRADING"] = True
     oro.on("GET", "/dashboard/me", data=CAPS)
     oro.on("GET", "/wallet", data={"available_inr": 100000})
@@ -74,26 +82,26 @@ def test_trade_quote_confirm_flow(app, client, auth, oro):
     oro.on("POST", "/buy/confirm", data={"transaction_id": "txn_1", "status": "completed", "amount_inr": 100,
                                         "quantity_grams": 0.0065})
 
-    quote = client.post("/api/v1/gold/trades/buy/quote", json={"asset_type": "gold", "amount_inr": 100}, headers=auth)
+    quote = client.post("/api/v1/gold/trades/buy/quote", json={"asset_type": "gold", "amount_inr": 100}, headers=gold_auth)
     assert quote.status_code == 201
-    res = client.post("/api/v1/gold/trades/buy/confirm", json={"quote_id": "tqt_1"}, headers=auth)
+    res = client.post("/api/v1/gold/trades/buy/confirm", json={"quote_id": "tqt_1"}, headers=gold_auth)
     assert res.status_code == 200
     confirm_call = [c for c in oro.calls if c["path"] == "/buy/confirm"][0]
     assert confirm_call["idempotency_key"] == "buy-confirm-tqt_1"
 
-    txs = client.get("/api/v1/gold/transactions?refresh=false", headers=auth).get_json()["data"]
+    txs = client.get("/api/v1/gold/transactions?refresh=false", headers=gold_auth).get_json()["data"]
     assert txs[0]["transaction_id"] == "txn_1" and txs[0]["type"] == "buy"
 
 
-def test_cannot_confirm_someone_elses_quote(app, client, auth, oro):
-    from tests.conftest import login
+def test_cannot_confirm_someone_elses_quote(app, client, gold_auth, oro):
+    from tests.conftest import login_with_mobile
     app.config["ENABLE_RAW_TRADING"] = True
     oro.on("GET", "/dashboard/me", data=CAPS)
     oro.on("GET", "/wallet", data={"available_inr": 100000})
     oro.on("POST", "/users/init", data={"user_code": "usr_api1"})
     oro.on("POST", "/buy/quote", data={"quote_id": "tqt_9"})
-    client.post("/api/v1/gold/trades/buy/quote", json={"asset_type": "gold", "amount_inr": 100}, headers=auth)
-    _, other = login(client, "9123456780", "Ravi")
+    client.post("/api/v1/gold/trades/buy/quote", json={"asset_type": "gold", "amount_inr": 100}, headers=gold_auth)
+    other = login_with_mobile(client, sub="ravi", mobile="9123456780")
     res = client.post("/api/v1/gold/trades/buy/confirm", json={"quote_id": "tqt_9"}, headers=other)
     assert res.status_code == 404
 
@@ -105,9 +113,9 @@ def _signed(body: dict, ts=None, secret=WEBHOOK_SECRET):
     return raw, {"X-OroPocket-Signature": sig, "X-OroPocket-Timestamp": ts, "Content-Type": "application/json"}
 
 
-def test_webhook_records_buy_for_user(client, auth, oro):
+def test_webhook_records_buy_for_user(client, gold_auth, oro):
     oro.on("POST", "/users/init", data={"user_code": "usr_e5", "embed_url": "https://x/?u=usr_e5"})
-    client.post("/api/v1/gold/embed-session", json={}, headers=auth)
+    client.post("/api/v1/gold/embed-session", json={}, headers=gold_auth)
 
     event = {"event": "buy.completed", "event_id": "evt_1", "mode": "sandbox",
              "data": {"user_code": "usr_e5", "asset_type": "gold", "amount_inr": 1000,
@@ -117,7 +125,7 @@ def test_webhook_records_buy_for_user(client, auth, oro):
     dup = client.post("/api/v1/webhooks/oropocket", data=raw, headers=headers).get_json()
     assert dup["data"]["duplicate"] is True
 
-    txs = client.get("/api/v1/gold/transactions?refresh=false", headers=auth).get_json()["data"]
+    txs = client.get("/api/v1/gold/transactions?refresh=false", headers=gold_auth).get_json()["data"]
     assert len(txs) == 1 and txs[0]["quantity_grams"] == 0.0647
 
 

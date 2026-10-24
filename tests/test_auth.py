@@ -1,46 +1,49 @@
-from tests.conftest import login
+from tests.conftest import fake_id_token, login
 
 
 def test_health(client):
     body = client.get("/api/v1/health").get_json()
     assert body["success"] and body["data"]["database"] == "mock"
+    assert body["data"]["auth"] == "google"
 
 
-def test_otp_login_creates_user(client):
-    tokens, headers = login(client, "+91 98765 43210")
+def test_google_login_creates_user(client):
+    tokens, headers = login(client, sub="google-abc")
     me = client.get("/api/v1/me", headers=headers).get_json()["data"]
-    assert me["mobile"] == "9876543210"
+    assert me["email"] == "google-abc@example.com"
     assert me["name"] == "Anya"
+    assert me["mobile"] is None
     assert tokens["token_type"] == "Bearer"
 
 
-def test_invalid_mobile_rejected(client):
-    res = client.post("/api/v1/auth/otp/send", json={"mobile": "12345"})
-    assert res.status_code == 422
-    assert res.get_json()["error"]["code"] == "INVALID_MOBILE"
+def test_google_login_is_idempotent_per_account(client):
+    first, _ = login(client, sub="same-sub")
+    second, _ = login(client, sub="same-sub")
+    # Same Google account signs in twice -> same user, fresh session each time.
+    me1 = client.get("/api/v1/me", headers={"Authorization": f"Bearer {first['access_token']}"})
+    me2 = client.get("/api/v1/me", headers={"Authorization": f"Bearer {second['access_token']}"})
+    assert me1.get_json()["data"]["id"] == me2.get_json()["data"]["id"]
 
 
-def test_wrong_code_then_lockout(client):
-    client.post("/api/v1/auth/otp/send", json={"mobile": "9000000001"})
-    for _ in range(5):
-        res = client.post("/api/v1/auth/otp/verify", json={"mobile": "9000000001", "code": "000000"})
-        assert res.get_json()["error"]["code"] in ("OTP_INVALID",)
-    res = client.post("/api/v1/auth/otp/verify", json={"mobile": "9000000001", "code": "000000"})
-    assert res.status_code == 429
+def test_different_accounts_are_different_users(client):
+    _, a = login(client, sub="user-a")
+    _, b = login(client, sub="user-b")
+    id_a = client.get("/api/v1/me", headers=a).get_json()["data"]["id"]
+    id_b = client.get("/api/v1/me", headers=b).get_json()["data"]["id"]
+    assert id_a != id_b
 
 
-def test_resend_cooldown(client):
-    client.post("/api/v1/auth/otp/send", json={"mobile": "9000000002"})
-    res = client.post("/api/v1/auth/otp/send", json={"mobile": "9000000002"})
-    assert res.status_code == 429
-    assert res.get_json()["error"]["code"] == "OTP_COOLDOWN"
+def test_is_new_user_flag(client):
+    first = client.post("/api/v1/auth/google", json={"idToken": fake_id_token("brand-new")}).get_json()["data"]
+    assert first["is_new_user"] is True
+    again = client.post("/api/v1/auth/google", json={"idToken": fake_id_token("brand-new")}).get_json()["data"]
+    assert again["is_new_user"] is False
 
 
-def test_code_is_single_use(client):
-    sent = client.post("/api/v1/auth/otp/send", json={"mobile": "9000000003"}).get_json()
-    code = sent["data"]["dev_code"]
-    assert client.post("/api/v1/auth/otp/verify", json={"mobile": "9000000003", "code": code}).status_code == 200
-    assert client.post("/api/v1/auth/otp/verify", json={"mobile": "9000000003", "code": code}).status_code == 400
+def test_invalid_google_token_rejected(client):
+    res = client.post("/api/v1/auth/google", json={"idToken": fake_id_token("bad")})
+    assert res.status_code == 401
+    assert res.get_json()["error"]["code"] == "GOOGLE_TOKEN_INVALID"
 
 
 def test_refresh_rotation_and_reuse_detection(client):
@@ -64,10 +67,3 @@ def test_requires_auth(client):
 def test_delete_account(client, auth):
     assert client.delete("/api/v1/me", headers=auth).status_code == 200
     assert client.get("/api/v1/me", headers=auth).status_code == 401
-
-
-def test_otp_disabled_provider(app):
-    app.config["OTP_PROVIDER"] = "disabled"
-    res = app.test_client().post("/api/v1/auth/otp/send", json={"mobile": "9876543210"})
-    assert res.status_code == 503
-    assert res.get_json()["error"]["code"] == "OTP_DISABLED"

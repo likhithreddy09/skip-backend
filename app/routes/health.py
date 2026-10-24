@@ -21,6 +21,7 @@ def health():
             "database": db_status,
             "gold_mode": cfg["OROPOCKET_MODE"],
             "webhooks_configured": bool(cfg["OROPOCKET_WEBHOOK_SECRET"]),
-            "otp_provider": cfg["OTP_PROVIDER"],
+            "auth": "google",
+            "google_configured": bool(cfg["GOOGLE_CLIENT_IDS"]),
         }
     )

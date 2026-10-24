@@ -21,21 +21,13 @@ def load_config() -> dict:
         "MONGODB_URI": os.getenv("MONGODB_URI", "").strip(),
         "MONGODB_DB": os.getenv("MONGODB_DB", "skipmint").strip(),
         "JWT_SECRET": os.getenv("JWT_SECRET", ""),
-        "OTP_PEPPER": os.getenv("OTP_PEPPER", ""),
         "ACCESS_TOKEN_TTL_MINUTES": _int("ACCESS_TOKEN_TTL_MINUTES", 60),
         "REFRESH_TOKEN_TTL_DAYS": _int("REFRESH_TOKEN_TTL_DAYS", 30),
-        "OTP_PROVIDER": os.getenv("OTP_PROVIDER", "console").strip().lower(),
-        "OTP_LENGTH": max(4, min(8, _int("OTP_LENGTH", 6))),
-        "OTP_TTL_SECONDS": 300,
-        "OTP_RESEND_COOLDOWN_SECONDS": 30,
-        "OTP_MAX_SENDS_PER_WINDOW": 5,
-        "OTP_SEND_WINDOW_SECONDS": 15 * 60,
-        "OTP_MAX_ATTEMPTS": 5,
-        "MSG91_AUTH_KEY": os.getenv("MSG91_AUTH_KEY", ""),
-        "MSG91_TEMPLATE_ID": os.getenv("MSG91_TEMPLATE_ID", ""),
-        "TWILIO_ACCOUNT_SID": os.getenv("TWILIO_ACCOUNT_SID", ""),
-        "TWILIO_AUTH_TOKEN": os.getenv("TWILIO_AUTH_TOKEN", ""),
-        "TWILIO_FROM": os.getenv("TWILIO_FROM", ""),
+        # Google Sign-In: comma-separated OAuth client IDs that are valid audiences
+        # for the ID token (Android, iOS, and/or Web client IDs from one project).
+        "GOOGLE_CLIENT_IDS": [
+            c.strip() for c in os.getenv("GOOGLE_CLIENT_IDS", "").split(",") if c.strip()
+        ],
         "OROPOCKET_API_KEY": oro_key,
         "OROPOCKET_BASE_URL": "https://api.oropocket.com/partner",
         "OROPOCKET_MODE": "live"
@@ -57,10 +49,9 @@ def validate_config(config: dict) -> None:
     problems = []
     if not config["MONGODB_URI"]:
         problems.append("MONGODB_URI")
-    for key in ("JWT_SECRET", "OTP_PEPPER"):
-        if len(config[key]) < 32 or config[key] == "change-me":
-            problems.append(f"{key} (32+ random chars)")
-    if config["OTP_PROVIDER"] == "console":
-        problems.append("OTP_PROVIDER (console is dev-only; use msg91, twilio or disabled)")
+    if len(config["JWT_SECRET"]) < 32 or config["JWT_SECRET"] == "change-me":
+        problems.append("JWT_SECRET (32+ random chars)")
+    if not config["GOOGLE_CLIENT_IDS"]:
+        problems.append("GOOGLE_CLIENT_IDS (at least one Google OAuth client ID)")
     if problems:
         raise RuntimeError("Missing/unsafe production config: " + ", ".join(problems))

@@ -34,14 +34,9 @@ class Schema(BaseModel):
 # --- auth --------------------------------------------------------------------
 
 
-class OtpSendIn(Schema):
-    mobile: str = Field(min_length=1, max_length=20)
-
-
-class OtpVerifyIn(Schema):
-    mobile: str = Field(min_length=1, max_length=20)
-    code: str = Field(min_length=4, max_length=8, pattern=r"^\d+$")
-    name: str | None = Field(default=None, max_length=80)
+class GoogleSignInIn(Schema):
+    # The Google ID token (JWT) returned by the Google Sign-In SDK on the client.
+    id_token: str = Field(min_length=20, max_length=4096)
 
 
 class RefreshIn(Schema):
@@ -59,6 +54,8 @@ class LogoutIn(Schema):
 class AccountPatch(Schema):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     email: str | None = Field(default=None, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    # 10-digit Indian mobile (OroPocket needs it for gold buy/sell). Normalized server-side.
+    mobile: str | None = Field(default=None, min_length=1, max_length=20)
 
 
 class Profile(Schema):

@@ -7,6 +7,7 @@ from flask import current_app
 from pymongo import ReturnDocument
 
 from ..db import get_db
+from ..errors import ApiError
 from ..utils import as_utc, utcnow
 from . import oropocket
 
@@ -31,7 +32,14 @@ def ensure_api_user_code(user: dict) -> str:
     account = get_account(user["_id"])
     if account and account.get("api_user_code"):
         return account["api_user_code"]
-    payload = {"flow": "api", "mobile": user["mobile"]}
+    mobile = user.get("mobile")
+    if not mobile:
+        raise ApiError(
+            422,
+            "MOBILE_REQUIRED",
+            "Add your mobile number in your profile before buying or selling gold.",
+        )
+    payload = {"flow": "api", "mobile": mobile}
     name = user.get("name") or (user.get("profile") or {}).get("name")
     if name:
         payload["name"] = name[:128]

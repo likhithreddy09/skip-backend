@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import secrets
 from datetime import timedelta
 from functools import wraps
@@ -17,11 +16,6 @@ JWT_ALG = "HS256"
 
 def sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
-
-
-def hash_otp(mobile: str, code: str) -> str:
-    pepper = current_app.config["OTP_PEPPER"].encode()
-    return hmac.new(pepper, f"{mobile}:{code}".encode(), hashlib.sha256).hexdigest()
 
 
 def issue_access_token(user_id: ObjectId) -> tuple[str, int]:

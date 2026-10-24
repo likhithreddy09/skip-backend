@@ -1,6 +1,7 @@
 from flask import Blueprint, request
 from pydantic import BaseModel
 from pymongo import DESCENDING, ReturnDocument, UpdateOne
+from pymongo.errors import DuplicateKeyError
 
 from ..db import RECORD_COLLECTIONS, get_db
 from ..errors import ApiError, ok
@@ -19,7 +20,7 @@ from ..schemas import (
 )
 from ..security import current_user, require_auth, revoke_all_sessions
 from ..serializers import record_out, settings_out, user_out
-from ..utils import parse_body, query_datetime, query_int, utcnow
+from ..utils import normalize_mobile, parse_body, query_datetime, query_int, utcnow
 
 bp = Blueprint("me", __name__, url_prefix="/me")
 
@@ -58,12 +59,20 @@ def get_me():
 def patch_me():
     changes = parse_body(AccountPatch).model_dump(exclude_unset=True)
     if not changes:
-        raise ApiError(422, "NOTHING_TO_UPDATE", "Send name and/or email.")
-    user = get_db().users.find_one_and_update(
-        {"_id": _uid()},
-        {"$set": {**changes, "updated_at": utcnow()}},
-        return_document=ReturnDocument.AFTER,
-    )
+        raise ApiError(422, "NOTHING_TO_UPDATE", "Send name, email and/or mobile.")
+    if "mobile" in changes and changes["mobile"] is not None:
+        mobile = normalize_mobile(changes["mobile"])
+        if not mobile:
+            raise ApiError(422, "INVALID_MOBILE", "Enter a valid 10-digit Indian mobile number.")
+        changes["mobile"] = mobile
+    try:
+        user = get_db().users.find_one_and_update(
+            {"_id": _uid()},
+            {"$set": {**changes, "updated_at": utcnow()}},
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError:
+        raise ApiError(409, "MOBILE_IN_USE", "That mobile number is already linked to another account.")
     return ok(user_out(user))
 
 

@@ -25,9 +25,8 @@ def create_app(overrides: dict | None = None) -> Flask:
     validate_config(app.config)
 
     if not app.config["IS_PRODUCTION"]:
-        # Dev-only fallbacks so the server boots before secrets are set.
+        # Dev-only fallback so the server boots before secrets are set.
         app.config["JWT_SECRET"] = app.config["JWT_SECRET"] or "dev-jwt-secret-change-me-0123456789"
-        app.config["OTP_PEPPER"] = app.config["OTP_PEPPER"] or "dev-otp-pepper-change-me-0123456789"
 
     origins = app.config["CORS_ORIGINS"]
     CORS(app, resources={rf"{API_PREFIX}/*": {"origins": "*" if origins == ["*"] else origins}})

@@ -49,11 +49,26 @@ def get_db() -> Database:
     return current_app.extensions["mongo_db"]
 
 
-def ensure_indexes(db: Database) -> None:
-    db.users.create_index("mobile", unique=True)
+def _migrate_mobile_index(db: Database) -> None:
+    """Ensure users.mobile is a sparse unique index (was plain unique pre-Google)."""
+    try:
+        existing = db.users.index_information()
+    except Exception:
+        existing = {}
+    for name, spec in existing.items():
+        keys = spec.get("key", [])
+        if keys and keys[0][0] == "mobile" and not spec.get("sparse"):
+            db.users.drop_index(name)
+            break
+    db.users.create_index("mobile", unique=True, sparse=True)
 
-    db.otp_requests.create_index("mobile", unique=True)
-    db.otp_requests.create_index("purge_at", expireAfterSeconds=0)
+
+def ensure_indexes(db: Database) -> None:
+    # Identity is the Google account id. Older deployments had a plain unique
+    # index on `mobile`; that rejects multiple Google users (all mobile=None),
+    # so migrate it to a sparse unique index that ignores missing values.
+    _migrate_mobile_index(db)
+    db.users.create_index("google_sub", unique=True)
 
     db.sessions.create_index("token_hash", unique=True)
     db.sessions.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])

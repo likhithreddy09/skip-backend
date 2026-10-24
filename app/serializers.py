@@ -3,12 +3,14 @@ from .utils import mask_mobile
 
 
 def user_out(user: dict) -> dict:
+    mobile = user.get("mobile")
     return {
         "id": str(user["_id"]),
-        "mobile": user["mobile"],
-        "mobile_masked": mask_mobile(user["mobile"]),
+        "mobile": mobile,
+        "mobile_masked": mask_mobile(mobile) if mobile else None,
         "name": user.get("name"),
         "email": user.get("email"),
+        "picture": user.get("picture"),
         "created_at": user["created_at"],
         "last_login_at": user.get("last_login_at"),
         "has_profile": bool(user.get("profile")),
