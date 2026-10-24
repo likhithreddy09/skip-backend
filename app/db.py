@@ -1,5 +1,6 @@
 import logging
 
+import certifi
 from flask import Flask, current_app
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.database import Database
@@ -13,11 +14,15 @@ RECORD_COLLECTIONS = ("habit_logs", "deposits", "skip_queue", "purchases", "sip_
 def init_db(app: Flask) -> None:
     uri = app.config["MONGODB_URI"]
     if uri:
+        # Atlas requires TLS. On some hosts the system CA store triggers a
+        # "TLSV1_ALERT_INTERNAL_ERROR" handshake failure, so point pymongo at
+        # certifi's up-to-date CA bundle explicitly.
         client = MongoClient(
             uri,
             tz_aware=True,
             serverSelectionTimeoutMS=8000,
             appname="skipmint-api",
+            tlsCAFile=certifi.where(),
         )
     else:
         if app.config["IS_PRODUCTION"]:
@@ -31,7 +36,13 @@ def init_db(app: Flask) -> None:
     app.extensions["mongo_client"] = client
     app.extensions["mongo_db"] = db
     app.extensions["mongo_is_mock"] = not uri
-    ensure_indexes(db)
+    try:
+        ensure_indexes(db)
+    except Exception:
+        # Don't let a transient connection/index issue crash-loop the worker and
+        # keep the HTTP port closed. Indexes are idempotent and get created on a
+        # later boot; the /health endpoint stays up so the platform sees the port.
+        log.exception("ensure_indexes failed during startup; continuing without blocking boot")
 
 
 def get_db() -> Database:
